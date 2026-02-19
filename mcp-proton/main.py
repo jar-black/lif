@@ -26,10 +26,19 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "1025"))
 PROTON_EMAIL = os.environ["PROTON_EMAIL"]
 PROTON_BRIDGE_PASSWORD = os.environ["PROTON_BRIDGE_PASSWORD"]
 
-CALENDAR_STUB_MSG = (
-    "Calendar access via the unofficial API is not yet implemented. "
-    "Use the Proton web app for calendar operations."
-)
+# Calendar — direct Proton API (SRP + PGP)
+PROTON_PASSWORD = os.environ["PROTON_PASSWORD"]
+PROTON_MAILBOX_PASSWORD = os.environ["PROTON_MAILBOX_PASSWORD"]
+
+_proton_client = None
+
+
+def _get_client():
+    global _proton_client
+    if _proton_client is None:
+        from proton_client import ProtonClient
+        _proton_client = ProtonClient(PROTON_EMAIL, PROTON_PASSWORD, PROTON_MAILBOX_PASSWORD)
+    return _proton_client
 
 # ---------------------------------------------------------------------------
 # FastMCP server
@@ -235,18 +244,18 @@ def search_emails(
 
 
 # ---------------------------------------------------------------------------
-# Calendar tools (stubs)
+# Calendar tools (Proton raw API + SRP + PGP)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def list_calendar_events(start_date: str, end_date: str) -> str:
+def list_calendar_events(start_date: str, end_date: str) -> list[dict]:
     """List calendar events in a date range.
 
     Args:
         start_date: Start date (ISO 8601).
         end_date: End date (ISO 8601).
     """
-    return CALENDAR_STUB_MSG
+    return _get_client().list_events(start_date, end_date)
 
 
 @mcp.tool()
@@ -266,7 +275,8 @@ def create_calendar_event(
         description: Optional event description.
         location: Optional event location.
     """
-    return CALENDAR_STUB_MSG
+    event_ref = _get_client().create_event(title, start, end, description, location)
+    return f"Event created: {event_ref}"
 
 
 @mcp.tool()
@@ -274,9 +284,16 @@ def delete_calendar_event(event_id: str) -> str:
     """Delete a calendar event by ID.
 
     Args:
-        event_id: The calendar event identifier.
+        event_id: The calendar event identifier in '{calendarID}/{eventID}' format,
+                  as returned by list_calendar_events or create_calendar_event.
     """
-    return CALENDAR_STUB_MSG
+    parts = event_id.split("/", 1)
+    if len(parts) != 2:
+        return (
+            f"Invalid event_id format. Expected '{{calendarID}}/{{eventID}}', got: {event_id!r}"
+        )
+    _get_client().delete_event(parts[0], parts[1])
+    return f"Event {event_id} deleted."
 
 
 # ---------------------------------------------------------------------------

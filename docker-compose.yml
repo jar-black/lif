@@ -71,10 +71,14 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       PROTON_EMAIL: ${PROTON_EMAIL}
       PROTON_BRIDGE_PASSWORD: ${PROTON_BRIDGE_PASSWORD}
+      PROTON_PASSWORD: ${PROTON_PASSWORD}
+      PROTON_MAILBOX_PASSWORD: ${PROTON_MAILBOX_PASSWORD}
       IMAP_HOST: "172.19.0.1"
       IMAP_PORT: "1143"
       SMTP_HOST: "172.19.0.1"
       SMTP_PORT: "1025"
+    volumes:
+      - proton-session-data:/data
     networks:
       - web
       - internal
@@ -166,6 +170,7 @@ services:
 # ── Volumes ────────────────────────────────────────────────────────────────
 volumes:
   proton-data:
+  proton-session-data:
   lists-data:
   deals-data:
   habits-data:
