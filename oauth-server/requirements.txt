@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+authlib
+python-jose[cryptography]
+python-multipart
+httpx
+jinja2

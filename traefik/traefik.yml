@@ -1,0 +1,54 @@
+# Traefik v3 Static Configuration
+# This file is mounted read-only into the Traefik container.
+
+# API / Dashboard (disabled in production — enable locally for debugging)
+api:
+  dashboard: false
+
+# Entrypoints
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+# Certificate Resolver — Let's Encrypt via ACME DNS-01 challenge (DuckDNS)
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Set your email for expiry notifications
+      email: "vaken@protonmail.com"
+      storage: "/acme/acme.json"
+      dnsChallenge:
+        provider: duckdns
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+
+# Providers
+providers:
+  # Docker provider — reads labels from running containers
+  docker:
+    exposedByDefault: false
+    network: lif-web
+
+  # File provider — for any static route overrides (optional)
+  # file:
+  #   directory: /etc/traefik/conf.d
+  #   watch: true
+
+# Logging
+log:
+  level: INFO
+
+accessLog: {}
