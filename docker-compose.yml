@@ -1,0 +1,179 @@
+name: lif
+
+services:
+
+  # ── Traefik — Reverse proxy + TLS ─────────────────────────────────────────
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/acme.json:/acme/acme.json
+    networks:
+      - web
+    labels:
+      - "traefik.enable=false"
+
+  # ── OAuth 2.0 Authorization Server ────────────────────────────────────────
+  oauth-server:
+    build: ./oauth-server
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      OWNER_PASSWORD: ${OWNER_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_HOURS: ${JWT_EXPIRES_HOURS:-1}
+      REFRESH_EXPIRES_DAYS: ${REFRESH_EXPIRES_DAYS:-30}
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.oauth-well-known.rule=Host(`${DOMAIN}`) && PathPrefix(`/.well-known`)"
+      - "traefik.http.routers.oauth-well-known.entrypoints=websecure"
+      - "traefik.http.routers.oauth-well-known.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.oauth-well-known.service=oauth-server"
+      - "traefik.http.routers.oauth-auth.rule=Host(`${DOMAIN}`) && PathPrefix(`/auth`)"
+      - "traefik.http.routers.oauth-auth.entrypoints=websecure"
+      - "traefik.http.routers.oauth-auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.oauth-auth.service=oauth-server"
+      - "traefik.http.services.oauth-server.loadbalancer.server.port=8000"
+
+  # ── Proton Mail Bridge ─────────────────────────────────────────────────────
+  # First-run setup:
+  #   docker attach lif-proton-bridge-1
+  #   Type: login
+  #   Follow prompts (email + password + 2FA if enabled)
+  #   Then: info   ← shows the bridge SMTP/IMAP password for .env
+  #   Detach with Ctrl+P, Ctrl+Q  (do NOT Ctrl+C — that kills the container)
+  proton-bridge:
+    image: shenxn/protonmail-bridge:latest
+    restart: unless-stopped
+    volumes:
+      - proton-data:/root
+    networks:
+      - web       # needs internet access to reach mail-api.proton.me
+      - internal  # reachable by mcp-proton via internal hostname
+
+  # ── MCP: ProtonMail + Calendar ─────────────────────────────────────────────
+  mcp-proton:
+    build: ./mcp-proton
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      PROTON_EMAIL: ${PROTON_EMAIL}
+      PROTON_BRIDGE_PASSWORD: ${PROTON_BRIDGE_PASSWORD}
+      IMAP_HOST: "172.19.0.1"
+      IMAP_PORT: "1143"
+      SMTP_HOST: "172.19.0.1"
+      SMTP_PORT: "1025"
+    networks:
+      - web
+      - internal
+    labels:
+      - "traefik.enable=true"
+      # Rewrite /mcp/proton[/...] → /mcp[/...] so FastMCP (which serves at /mcp) gets the right path
+      # Shared middleware: rewrite Host to localhost (required by FastMCP's DNS-rebinding protection)
+      - "traefik.http.middlewares.set-host-localhost.headers.customrequestheaders.Host=localhost"
+      - "traefik.http.middlewares.rewrite-mcp-proton.replacepathregex.regex=^/mcp/proton(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-proton.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-proton.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/proton`)"
+      - "traefik.http.routers.mcp-proton.entrypoints=websecure"
+      - "traefik.http.routers.mcp-proton.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-proton.middlewares=rewrite-mcp-proton,set-host-localhost"
+      - "traefik.http.services.mcp-proton.loadbalancer.server.port=8001"
+
+  # ── MCP: Task Lists ────────────────────────────────────────────────────────
+  mcp-lists:
+    build: ./mcp-lists
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - lists-data:/data
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rewrite-mcp-lists.replacepathregex.regex=^/mcp/lists(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-lists.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-lists.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/lists`)"
+      - "traefik.http.routers.mcp-lists.entrypoints=websecure"
+      - "traefik.http.routers.mcp-lists.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-lists.middlewares=rewrite-mcp-lists,set-host-localhost"
+      - "traefik.http.services.mcp-lists.loadbalancer.server.port=8002"
+
+  # ── MCP: Grocery Deals ────────────────────────────────────────────────────
+  mcp-deals:
+    build: ./mcp-deals
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      STORE_1_NAME: ${STORE_1_NAME:-Hemköp Masthugget}
+      STORE_1_URL: ${STORE_1_URL:-https://www.hemkop.se/erbjudanden}
+      STORE_2_NAME: ${STORE_2_NAME:-Willys Första Långgatan}
+      STORE_2_URL: ${STORE_2_URL:-https://www.willys.se/erbjudanden}
+      STORE_3_NAME: ${STORE_3_NAME:-Lidl Kungsgatan 16}
+      STORE_3_URL: ${STORE_3_URL:-https://www.lidl.se/erbjudanden-och-rabatter}
+    volumes:
+      - deals-data:/data
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rewrite-mcp-deals.replacepathregex.regex=^/mcp/deals(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-deals.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-deals.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/deals`)"
+      - "traefik.http.routers.mcp-deals.entrypoints=websecure"
+      - "traefik.http.routers.mcp-deals.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-deals.middlewares=rewrite-mcp-deals,set-host-localhost"
+      - "traefik.http.services.mcp-deals.loadbalancer.server.port=8003"
+
+  # ── MCP: Habits & Routines ─────────────────────────────────────────────────
+  mcp-habits:
+    build: ./mcp-habits
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - habits-data:/data
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rewrite-mcp-habits.replacepathregex.regex=^/mcp/habits(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-habits.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-habits.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/habits`)"
+      - "traefik.http.routers.mcp-habits.entrypoints=websecure"
+      - "traefik.http.routers.mcp-habits.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-habits.middlewares=rewrite-mcp-habits,set-host-localhost"
+      - "traefik.http.services.mcp-habits.loadbalancer.server.port=8004"
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  proton-data:
+  lists-data:
+  deals-data:
+  habits-data:
+
+# ── Networks ───────────────────────────────────────────────────────────────
+networks:
+  web:
+    name: lif-web
+  internal:
+    name: lif-internal
+    internal: true

@@ -1,0 +1,11 @@
+[Unit]
+Description=Proton Bridge SMTP relay (172.19.0.1:1025 -> 127.0.0.1:1025)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:1025,bind=172.19.0.1,reuseaddr,fork TCP:127.0.0.1:1025
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

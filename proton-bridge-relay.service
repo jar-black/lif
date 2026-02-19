@@ -1,0 +1,11 @@
+[Unit]
+Description=Proton Bridge IMAP relay (172.19.0.1:1143 -> 127.0.0.1:1143)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:1143,bind=172.19.0.1,reuseaddr,fork TCP:127.0.0.1:1143
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
