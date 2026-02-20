@@ -12,7 +12,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = "HS256"
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 RUNNER_IMAGE = os.environ.get("RUNNER_IMAGE", "lif-claude-runner")
 CLAUDE_SETTINGS_PATH = os.environ.get("CLAUDE_SETTINGS_PATH", "")
@@ -24,6 +24,12 @@ mcp = FastMCP("mcp-claude-runner", stateless_http=True, transport_security=_secu
 
 
 # --- JWT auth middleware ---
+
+
+RESOURCE_METADATA_URL = os.environ.get(
+    "RESOURCE_METADATA_URL",
+    "https://allander.duckdns.org/.well-known/oauth-protected-resource",
+)
 
 
 class JWTAuthMiddleware:
@@ -38,7 +44,12 @@ class JWTAuthMiddleware:
         request = Request(scope)
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
-            response = Response(status_code=401)
+            response = Response(
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": f'Bearer resource_metadata="{RESOURCE_METADATA_URL}"',
+                },
+            )
             await response(scope, receive, send)
             return
 
@@ -46,7 +57,12 @@ class JWTAuthMiddleware:
         try:
             jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         except JWTError:
-            response = Response(status_code=401)
+            response = Response(
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": f'Bearer resource_metadata="{RESOURCE_METADATA_URL}"',
+                },
+            )
             await response(scope, receive, send)
             return
 
@@ -81,8 +97,8 @@ git config user.name "Claude Code"
 git config user.email "claude@anthropic.com"
 
 # Copy Claude settings if available
-if [ -d /claude-settings/.claude ]; then
-    cp -r /claude-settings/.claude /root/.claude
+if [ -d /claude-settings ]; then
+    cp -r /claude-settings /root/.claude
 fi
 
 # Run Claude Code with the prompt + PR instruction
@@ -97,10 +113,11 @@ Print the PR URL as the last line of output." --dangerously-skip-permissions
 
     # Environment for the runner container
     env = {
-        "ANTHROPIC_API_KEY": ANTHROPIC_API_KEY,
         "GITHUB_TOKEN": GITHUB_TOKEN,
         "GH_TOKEN": GITHUB_TOKEN,
     }
+    if ANTHROPIC_API_KEY:
+        env["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 
     # Volumes
     volumes = {}

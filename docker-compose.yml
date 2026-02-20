@@ -181,7 +181,7 @@ services:
       CLAUDE_SETTINGS_PATH: /claude-settings
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - claude-settings:/claude-settings:ro
+      - ~/.claude:/claude-settings:ro
     networks:
       - web
     labels:
@@ -223,7 +223,6 @@ volumes:
   lists-data:
   deals-data:
   habits-data:
-  claude-settings:
   planner-data:
 
 # ── Networks ───────────────────────────────────────────────────────────────
