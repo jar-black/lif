@@ -167,6 +167,55 @@ services:
       - "traefik.http.routers.mcp-habits.middlewares=rewrite-mcp-habits,set-host-localhost"
       - "traefik.http.services.mcp-habits.loadbalancer.server.port=8004"
 
+  # ── MCP: Claude Runner ──────────────────────────────────────────────────
+  mcp-claude-runner:
+    build: ./mcp-claude-runner
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      RUNNER_IMAGE: lif-claude-runner
+      CLAUDE_SETTINGS_PATH: /claude-settings
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - claude-settings:/claude-settings:ro
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rewrite-mcp-claude-runner.replacepathregex.regex=^/mcp/claude-runner(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-claude-runner.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-claude-runner.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/claude-runner`)"
+      - "traefik.http.routers.mcp-claude-runner.entrypoints=websecure"
+      - "traefik.http.routers.mcp-claude-runner.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-claude-runner.middlewares=rewrite-mcp-claude-runner,set-host-localhost"
+      - "traefik.http.services.mcp-claude-runner.loadbalancer.server.port=8005"
+
+  # ── MCP: Day Planner ────────────────────────────────────────────────────
+  mcp-planner:
+    build: ./mcp-planner
+    restart: unless-stopped
+    depends_on:
+      - oauth-server
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - planner-data:/data
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.rewrite-mcp-planner.replacepathregex.regex=^/mcp/planner(.*)"
+      - "traefik.http.middlewares.rewrite-mcp-planner.replacepathregex.replacement=/mcp$${1}"
+      - "traefik.http.routers.mcp-planner.rule=Host(`${DOMAIN}`) && PathPrefix(`/mcp/planner`)"
+      - "traefik.http.routers.mcp-planner.entrypoints=websecure"
+      - "traefik.http.routers.mcp-planner.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mcp-planner.middlewares=rewrite-mcp-planner,set-host-localhost"
+      - "traefik.http.services.mcp-planner.loadbalancer.server.port=8006"
+
 # ── Volumes ────────────────────────────────────────────────────────────────
 volumes:
   proton-data:
@@ -174,6 +223,8 @@ volumes:
   lists-data:
   deals-data:
   habits-data:
+  claude-settings:
+  planner-data:
 
 # ── Networks ───────────────────────────────────────────────────────────────
 networks:
